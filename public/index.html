@@ -218,7 +218,7 @@ map.on('load', async () => {
         ${name ? `<div class="popup-name">${escapeHtml(name)}</div>` : ''}
         <div class="popup-id">${escapeHtml(id)}</div>
         <div class="popup-type">${escapeHtml(type)}</div>
-        <a class="popup-link" href="/stop/?id=${encodeURIComponent(id)}">View details →</a>
+        <a class="popup-link" href="stop/?id=${encodeURIComponent(id)}">View details →</a>
       `)
       .addTo(map);
   });
@@ -230,8 +230,8 @@ map.on('load', async () => {
   // Load points (in parallel) then populate the source
   try {
     const [gb, ie] = await Promise.all([
-      fetchGzipJSON('/data/gb/points.json.gz'),
-      fetchGzipJSON('/data/ie/points.json.gz'),
+      fetchGzipJSON('data/gb/points.json.gz'),
+      fetchGzipJSON('data/ie/points.json.gz'),
     ]);
     const features = new Array(gb.length + ie.length);
     let i = 0;
@@ -271,8 +271,8 @@ map.on('load', async () => {
 
   try {
     const [gb, ie] = await Promise.all([
-      fetchGzipJSON('/data/gb/names.json.gz'),
-      fetchGzipJSON('/data/ie/names.json.gz'),
+      fetchGzipJSON('data/gb/names.json.gz'),
+      fetchGzipJSON('data/ie/names.json.gz'),
     ]);
     entries = new Array(gb.length + ie.length);
     idToName = new Map();
@@ -325,7 +325,7 @@ map.on('load', async () => {
       return;
     }
     resultsEl.innerHTML = results.map(r => {
-      const href = `/${kindOf(r.id)}/?id=${encodeURIComponent(r.id)}`;
+      const href = `${kindOf(r.id)}/?id=${encodeURIComponent(r.id)}`;
       return `<li role="option"><a href="${href}">
         <span class="r-name">${escapeHtml(r.name) || '<em>(unnamed)</em>'}</span>
         <span class="r-type">${escapeHtml(r.type)}</span>
