@@ -133,7 +133,7 @@ async function main() {
   const prefix = id.slice(0, 3);
   let chunk;
   try {
-    chunk = await fetchGzipJSON(`/data/${region}/${prefix}.json.gz`);
+    chunk = await fetchGzipJSON(`../data/${region}/${prefix}.json.gz`);
   } catch (err) {
     return showError(`Failed to load ${region}/${prefix}: ${err.message}`);
   }
