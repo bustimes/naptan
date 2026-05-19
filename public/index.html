@@ -126,12 +126,17 @@ function classifyType(code) {
   return 'other';
 }
 
+const ATTRIBUTIONS = [
+  '<a href="https://beta-naptan.dft.gov.uk/">NaPTAN</a>',
+  '<a href="https://www.transportforireland.ie/transitData/PT_Data.html">Transport for Ireland</a>',
+];
+
 const map = new maplibregl.Map({
   container: 'map',
   style: 'https://tiles.openfreemap.org/styles/liberty',
   center: [-4.2, 54.5],  // roughly the centre of GB+IE combined
   zoom: 5,
-  attributionControl: { compact: true },
+  attributionControl: { compact: false, customAttribution: ATTRIBUTIONS },
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
@@ -251,7 +256,7 @@ map.on('load', async () => {
     }
     map.getSource('stops').setData({ type: 'FeatureCollection', features });
     document.getElementById('stats').innerHTML =
-      `<b>${gb.length.toLocaleString()}</b> GB · <b>${ie.length.toLocaleString()}</b> IE · OpenFreeMap tiles`;
+      `<b>${gb.length.toLocaleString()}</b> GB · <b>${ie.length.toLocaleString()}</b> IE`;
     document.getElementById('loading').remove();
   } catch (err) {
     document.getElementById('loading').textContent = `failed to load stops: ${err.message}`;
