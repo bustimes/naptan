@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stop area — NaPTAN Viewer</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/atom-one-light.min.css">
+<style>
+:root {
+  --bg: #fafaf7;
+  --fg: #111;
+  --muted: #666;
+  --rule: #d8d8d4;
+  --accent: #1a4d8f;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg); color: var(--fg);
+}
+header {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  letter-spacing: 0.02em; text-transform: uppercase;
+  font-size: 0.85rem; font-weight: 600;
+}
+header a { color: var(--fg); text-decoration: none; }
+header a:hover { color: var(--accent); }
+main { padding: 1rem; max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin: 0 0 0.3rem; font-weight: 600; }
+.meta {
+  font-family: var(--mono); font-size: 0.85rem; color: var(--muted);
+  margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem;
+}
+.meta b { color: var(--fg); font-weight: 600; }
+.badge {
+  display: inline-block; padding: 0.05rem 0.4rem;
+  border: 1px solid var(--rule); background: white;
+}
+#map { height: 360px; border: 1px solid var(--rule); margin-bottom: 1rem; }
+pre {
+  margin: 0; padding: 0.8rem 1rem;
+  border: 1px solid var(--rule); background: white;
+  overflow: auto; font-family: var(--mono); font-size: 0.8rem;
+  line-height: 1.45; max-height: 70vh;
+}
+code.hljs { padding: 0; background: transparent; }
+.error {
+  padding: 1rem; border: 1px solid #c44; background: #fff5f5; color: #800;
+  font-family: var(--mono);
+}
+</style>
+</head>
+<body data-pagefind-ignore>
+<header><a href="/">← NaPTAN Viewer</a></header>
+<main id="root">
+  <h1 id="name">Loading…</h1>
+  <div class="meta" id="meta"></div>
+  <div id="map"></div>
+  <pre><code class="language-xml" id="xml"></code></pre>
+</main>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>
+<script>
+async function fetchGzipJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+  return new Response(stream).json();
+}
+
+function regionFromId(id) {
+  // IE prefixes are in 7xx and 8xx; everything else (0-6, 9) is GB.
+  return (id[0] === '7' || id[0] === '8') ? 'ie' : 'gb';
+}
+
+function showError(msg) {
+  document.getElementById('root').innerHTML =
+    `<div class="error">${msg}</div>`;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+function prettyXml(xmlString) {
+  // Quick & dirty: parse and reserialize with indentation. Falls back to raw
+  // string if parsing fails (e.g. embedded fragment without a single root).
+  try {
+    const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) return xmlString;
+    return formatNode(doc.documentElement, 0);
+  } catch {
+    return xmlString;
+  }
+}
+function formatNode(node, depth) {
+  const indent = '  '.repeat(depth);
+  if (node.nodeType === Node.TEXT_NODE) {
+    const t = node.nodeValue.trim();
+    return t ? indent + escapeHtml(t) : '';
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+  const attrs = Array.from(node.attributes || [])
+    .map(a => ` ${a.name}="${escapeHtml(a.value)}"`).join('');
+  const children = Array.from(node.childNodes)
+    .map(c => formatNode(c, depth + 1))
+    .filter(Boolean);
+
+  if (!children.length) return `${indent}<${node.tagName}${attrs}/>`;
+  // Single text child — inline
+  if (children.length === 1 && node.childNodes.length === 1
+      && node.firstChild.nodeType === Node.TEXT_NODE) {
+    return `${indent}<${node.tagName}${attrs}>${escapeHtml(node.firstChild.nodeValue.trim())}</${node.tagName}>`;
+  }
+  return [
+    `${indent}<${node.tagName}${attrs}>`,
+    ...children,
+    `${indent}</${node.tagName}>`,
+  ].join('\n');
+}
+
+async function main() {
+  const id = new URLSearchParams(location.search).get('id');
+  if (!id) return showError('No stop id given. Append <code>?id=AtcoCode</code> to the URL.');
+
+  const region = regionFromId(id);
+  const prefix = id.slice(0, 3);
+  let chunk;
+  try {
+    chunk = await fetchGzipJSON(`/data/${region}/${prefix}.json.gz`);
+  } catch (err) {
+    return showError(`Failed to load ${region}/${prefix}: ${err.message}`);
+  }
+
+  const stop = chunk.find(r => r.id === id);
+  if (!stop) return showError(`Stop <b>${escapeHtml(id)}</b> not found in ${region}/${prefix}.`);
+
+  // Header / metadata
+  document.title = `${stop.name} (${stop.id}) — NaPTAN Viewer`;
+  document.getElementById('name').textContent = stop.name || stop.id;
+  document.getElementById('meta').innerHTML = `
+    <span><b>${escapeHtml(stop.id)}</b></span>
+    <span class="badge">${escapeHtml(stop.type) || '—'}</span>
+    <span>${stop.lat?.toFixed(6)}, ${stop.lon?.toFixed(6)}</span>
+    <span>${region.toUpperCase()}</span>
+  `;
+
+  // Map
+  if (stop.lat != null && stop.lon != null) {
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://tiles.openfreemap.org/styles/liberty',
+      center: [stop.lon, stop.lat],
+      zoom: 15,
+      attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
+    new maplibregl.Marker({ color: '#1a4d8f' })
+      .setLngLat([stop.lon, stop.lat]).addTo(map);
+  } else {
+    document.getElementById('map').remove();
+  }
+
+  // XML
+  const xmlEl = document.getElementById('xml');
+  xmlEl.textContent = prettyXml(stop.xml);
+  hljs.highlightElement(xmlEl);
+}
+
+main();
+</script>
+</body>
+</html>

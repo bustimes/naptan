@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NaPTAN Viewer</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+:root {
+  --bg: #fafaf7;
+  --fg: #111;
+  --muted: #666;
+  --rule: #d8d8d4;
+  --accent: #1a4d8f;
+  --bus: #1a4d8f;
+  --rail: #b03030;
+  --metro: #7030a0;
+  --ferry: #2080a0;
+  --air: #c06000;
+  --other: #555;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg); color: var(--fg);
+}
+header {
+  display: flex; align-items: baseline; gap: 1.5rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+h1 {
+  font-size: 1.1rem; font-weight: 600; margin: 0;
+  letter-spacing: 0.02em; text-transform: uppercase;
+}
+.stats {
+  font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
+  flex: 1;
+}
+.stats b { color: var(--fg); font-weight: 600; }
+#search { position: relative; flex: 0 0 340px; }
+#search-input {
+  width: 100%; padding: 0.4rem 0.6rem;
+  font: inherit; border: 1px solid var(--rule); border-radius: 0;
+  background: white;
+}
+#search-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#search-input:disabled { background: #f0f0eb; color: var(--muted); cursor: wait; }
+#search-results {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  margin: 0; padding: 0; list-style: none;
+  background: white; border: 1px solid var(--rule); border-top: none;
+  max-height: 60vh; overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+#search-results li {
+  padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--rule);
+  cursor: pointer; display: flex; gap: 0.6rem; align-items: baseline;
+}
+#search-results li:last-child { border-bottom: none; }
+#search-results li:hover, #search-results li[aria-selected="true"] {
+  background: #f0f0eb;
+}
+#search-results a { color: inherit; text-decoration: none; display: contents; }
+.r-name { flex: 1; font-weight: 500; }
+.r-id, .r-type {
+  font-family: var(--mono); font-size: 0.75rem; color: var(--muted);
+}
+.r-empty { padding: 0.5rem 0.7rem; color: var(--muted); font-size: 0.85rem; }
+#map { flex: 1; }
+.maplibregl-popup-content {
+  font: inherit; padding: 0.5rem 0.7rem; border-radius: 0;
+  border: 1px solid var(--rule); box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+.popup-id { font-family: var(--mono); font-size: 0.85em; color: var(--muted); }
+.popup-name { font-weight: 600; margin: 0.1rem 0; }
+.popup-type { font-family: var(--mono); font-size: 0.78em; color: var(--muted); }
+.popup-link { display: inline-block; margin-top: 0.3rem; color: var(--accent); }
+#loading {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 10; padding: 0.6rem 1rem; background: white;
+  border: 1px solid var(--rule); font-family: var(--mono); font-size: 0.85rem;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>NaPTAN Viewer</h1>
+  <div class="stats" id="stats">loading…</div>
+  <div id="search">
+    <input type="search" id="search-input" placeholder="Loading search…" autocomplete="off" disabled>
+    <ul id="search-results" role="listbox" hidden></ul>
+  </div>
+</header>
+<div id="map"></div>
+<div id="loading">loading stop data…</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+async function fetchGzipJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+  return new Response(stream).json();
+}
+
+function escapeHtml(s) {
+  return (s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+// Populated once names.json.gz finishes loading; map popups read from it lazily.
+let idToName = null;
+
+function classifyType(code) {
+  if (!code) return 'other';
+  const c = code[0];
+  if (c === 'B' || c === 'T') return 'bus';       // BCT/BCS/BST/BCQ/TXR
+  if (c === 'R' || c === 'P') return 'rail';      // RLY/RSE/RPL/PLT
+  if (c === 'M') return 'metro';                  // MET/TMU
+  if (c === 'F') return 'ferry';                  // FER/FBT
+  if (c === 'A' || c === 'G') return 'air';       // AIR/GAT
+  return 'other';
+}
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  center: [-4.2, 54.5],  // roughly the centre of GB+IE combined
+  zoom: 5,
+  attributionControl: { compact: true },
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
+map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+
+map.on('load', async () => {
+  map.addSource('stops', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    cluster: true,
+    clusterMaxZoom: 13,
+    clusterRadius: 45,
+  });
+
+  // Clusters
+  map.addLayer({
+    id: 'clusters',
+    type: 'circle',
+    source: 'stops',
+    filter: ['has', 'point_count'],
+    paint: {
+      'circle-color': [
+        'step', ['get', 'point_count'],
+        '#a3b8d4', 50, '#6e8cb8', 500, '#3d6098', 5000, '#1a4d8f',
+      ],
+      'circle-radius': [
+        'step', ['get', 'point_count'],
+        12, 50, 16, 500, 22, 5000, 30,
+      ],
+      'circle-stroke-color': 'rgba(255,255,255,0.7)',
+      'circle-stroke-width': 1,
+    },
+  });
+  map.addLayer({
+    id: 'cluster-count',
+    type: 'symbol',
+    source: 'stops',
+    filter: ['has', 'point_count'],
+    layout: {
+      'text-field': '{point_count_abbreviated}',
+      'text-font': ['Noto Sans Regular'],
+      'text-size': 11,
+    },
+    paint: { 'text-color': 'white' },
+  });
+
+  // Unclustered points: colour by mode
+  map.addLayer({
+    id: 'stops',
+    type: 'circle',
+    source: 'stops',
+    filter: ['!', ['has', 'point_count']],
+    paint: {
+      'circle-color': [
+        'match', ['get', 'mode'],
+        'bus',   '#1a4d8f',
+        'rail',  '#b03030',
+        'metro', '#7030a0',
+        'ferry', '#2080a0',
+        'air',   '#c06000',
+        /* other */ '#555',
+      ],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 16, 5],
+      'circle-stroke-color': 'white',
+      'circle-stroke-width': 1,
+    },
+  });
+
+  // Cluster click — zoom in
+  map.on('click', 'clusters', async (e) => {
+    const feature = e.features[0];
+    const clusterId = feature.properties.cluster_id;
+    const zoom = await map.getSource('stops').getClusterExpansionZoom(clusterId);
+    map.easeTo({ center: feature.geometry.coordinates, zoom });
+  });
+
+  // Stop click — popup with link
+  map.on('click', 'stops', (e) => {
+    const f = e.features[0];
+    const { id, type } = f.properties;
+    const name = idToName?.get(id);
+    new maplibregl.Popup({ closeButton: false, offset: 8 })
+      .setLngLat(f.geometry.coordinates)
+      .setHTML(`
+        ${name ? `<div class="popup-name">${escapeHtml(name)}</div>` : ''}
+        <div class="popup-id">${escapeHtml(id)}</div>
+        <div class="popup-type">${escapeHtml(type)}</div>
+        <a class="popup-link" href="/stop/?id=${encodeURIComponent(id)}">View details →</a>
+      `)
+      .addTo(map);
+  });
+  map.on('mouseenter', 'clusters', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'clusters', () => map.getCanvas().style.cursor = '');
+  map.on('mouseenter', 'stops', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'stops', () => map.getCanvas().style.cursor = '');
+
+  // Load points (in parallel) then populate the source
+  try {
+    const [gb, ie] = await Promise.all([
+      fetchGzipJSON('/data/gb/points.json.gz'),
+      fetchGzipJSON('/data/ie/points.json.gz'),
+    ]);
+    const features = new Array(gb.length + ie.length);
+    let i = 0;
+    for (const [id, lat, lon, type] of gb) {
+      features[i++] = {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+        properties: { id, type, mode: classifyType(type) },
+      };
+    }
+    for (const [id, lat, lon, type] of ie) {
+      features[i++] = {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+        properties: { id, type, mode: classifyType(type) },
+      };
+    }
+    map.getSource('stops').setData({ type: 'FeatureCollection', features });
+    document.getElementById('stats').innerHTML =
+      `<b>${gb.length.toLocaleString()}</b> GB · <b>${ie.length.toLocaleString()}</b> IE · OpenFreeMap tiles`;
+    document.getElementById('loading').remove();
+  } catch (err) {
+    document.getElementById('loading').textContent = `failed to load stops: ${err.message}`;
+    document.getElementById('stats').textContent = 'error';
+    console.error(err);
+  }
+});
+</script>
+
+<script>
+// In-browser substring search over names.json.gz — no pagefind / Rust / stubs.
+(async () => {
+  const input = document.getElementById('search-input');
+  const resultsEl = document.getElementById('search-results');
+
+  let entries = null;  // [id, name, type, nameLower] for every record
+
+  try {
+    const [gb, ie] = await Promise.all([
+      fetchGzipJSON('/data/gb/names.json.gz'),
+      fetchGzipJSON('/data/ie/names.json.gz'),
+    ]);
+    entries = new Array(gb.length + ie.length);
+    idToName = new Map();
+    let i = 0;
+    for (const r of gb) {
+      entries[i++] = [r[0], r[1], r[2], (r[1] || '').toLowerCase()];
+      idToName.set(r[0], r[1]);
+    }
+    for (const r of ie) {
+      entries[i++] = [r[0], r[1], r[2], (r[1] || '').toLowerCase()];
+      idToName.set(r[0], r[1]);
+    }
+    input.placeholder = `Search ${entries.length.toLocaleString()} stops…`;
+    input.disabled = false;
+  } catch (err) {
+    input.placeholder = `search unavailable (${err.message})`;
+    return;
+  }
+
+  // StopArea ATCO codes have 'G' as the 4th character; everything else is a StopPoint.
+  const kindOf = id => id[3] === 'G' ? 'stoparea' : 'stop';
+
+  function rank(q, nameLower, idLower) {
+    if (nameLower === q) return 0;
+    if (nameLower.startsWith(q)) return 1;
+    if (idLower.startsWith(q)) return 2;
+    if (nameLower.includes(q)) return 3;
+    if (idLower.includes(q)) return 4;
+    return -1;
+  }
+
+  function search(qRaw) {
+    const q = qRaw.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const matches = [];
+    for (const e of entries) {
+      const r = rank(q, e[3], e[0].toLowerCase());
+      if (r >= 0) matches.push({ id: e[0], name: e[1], type: e[2], rank: r });
+      if (matches.length > 1000) break;
+    }
+    matches.sort((a, b) => a.rank - b.rank || a.name.length - b.name.length);
+    return matches.slice(0, 30);
+  }
+
+  function render(results, query) {
+    if (!query.trim()) { resultsEl.hidden = true; resultsEl.innerHTML = ''; return; }
+    if (!results.length) {
+      resultsEl.innerHTML = '<li class="r-empty">no matches</li>';
+      resultsEl.hidden = false;
+      return;
+    }
+    resultsEl.innerHTML = results.map(r => {
+      const href = `/${kindOf(r.id)}/?id=${encodeURIComponent(r.id)}`;
+      return `<li role="option"><a href="${href}">
+        <span class="r-name">${escapeHtml(r.name) || '<em>(unnamed)</em>'}</span>
+        <span class="r-type">${escapeHtml(r.type)}</span>
+        <span class="r-id">${escapeHtml(r.id)}</span>
+      </a></li>`;
+    }).join('');
+    resultsEl.hidden = false;
+  }
+
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => render(search(input.value), input.value), 60);
+  });
+  input.addEventListener('focus', () => {
+    if (input.value.trim()) render(search(input.value), input.value);
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#search')) resultsEl.hidden = true;
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { resultsEl.hidden = true; input.blur(); }
+    if (e.key === 'Enter') {
+      const first = resultsEl.querySelector('li a');
+      if (first) location.href = first.getAttribute('href');
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

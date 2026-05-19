@@ -1,0 +1,10 @@
+{
+  "name": "naptan-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static viewer for NaPTAN (GB) and NTA/Translink (IE/NI) stops",
+  "scripts": {
+    "build": "python scripts/fetch-naptan.py",
+    "serve": "python -m http.server --directory public 8000"
+  }
+}
