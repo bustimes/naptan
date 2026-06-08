@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NaPTAN Viewer</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/atom-one-light.min.css">
 <style>
 :root {
   --bg: #fafaf7;
@@ -18,6 +19,7 @@
   --ferry: #2080a0;
   --air: #c06000;
   --other: #555;
+  --sel: #b03030;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
@@ -37,6 +39,7 @@ h1 {
   font-size: 1.1rem; font-weight: 600; margin: 0;
   letter-spacing: 0.02em; text-transform: uppercase;
 }
+h1 a { color: inherit; text-decoration: none; }
 .stats {
   font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
   flex: 1;
@@ -71,35 +74,101 @@ h1 {
   font-family: var(--mono); font-size: 0.75rem; color: var(--muted);
 }
 .r-empty { padding: 0.5rem 0.7rem; color: var(--muted); font-size: 0.85rem; }
+
+/* Stage: map + detail panel side by side */
+#stage { flex: 1; display: flex; min-height: 0; position: relative; }
 #map { flex: 1; }
+#detail {
+  flex: 0 0 440px; overflow-y: auto;
+  background: var(--bg); border-left: 1px solid var(--rule);
+  padding: 1rem;
+}
+#detail[hidden] { display: none; }
+.d-top { display: flex; align-items: flex-start; gap: 0.5rem; }
+#d-name { font-size: 1.4rem; margin: 0 0 0.3rem; font-weight: 600; flex: 1; }
+#d-close {
+  flex: 0 0 auto; border: 1px solid var(--rule); background: white;
+  font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer;
+  padding: 0.15rem 0.45rem; color: var(--muted);
+}
+#d-close:hover { color: var(--fg); }
+.meta {
+  font-family: var(--mono); font-size: 0.85rem; color: var(--muted);
+  margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem;
+}
+.meta b { color: var(--fg); font-weight: 600; }
+.badge {
+  display: inline-block; padding: 0.05rem 0.4rem;
+  border: 1px solid var(--rule); background: white;
+}
+.section-h {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 600; margin: 0 0 0.4rem;
+}
+#d-nearby { margin-bottom: 1rem; }
+.nearby-list { list-style: none; margin: 0; padding: 0; }
+.nearby-list li { border-bottom: 1px solid var(--rule); }
+.nearby-list li:last-child { border-bottom: none; }
+.nearby-list a {
+  display: flex; gap: 0.6rem; align-items: baseline;
+  padding: 0.3rem 0.1rem; color: inherit; text-decoration: none;
+}
+.nearby-list a:hover { background: #f0f0eb; }
+.n-dot {
+  flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%;
+  align-self: center;
+}
+.n-name { flex: 1; font-weight: 500; }
+.n-dist, .n-id {
+  font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+}
+pre {
+  margin: 0; padding: 0.8rem 0.9rem;
+  border: 1px solid var(--rule); background: white;
+  overflow: auto; font-family: var(--mono); font-size: 0.78rem;
+  line-height: 1.45; max-height: 50vh;
+}
+code.hljs { padding: 0; background: transparent; }
+.d-error {
+  padding: 0.8rem; border: 1px solid #c44; background: #fff5f5; color: #800;
+  font-family: var(--mono); font-size: 0.85rem;
+}
 .maplibregl-popup-content {
   font: inherit; padding: 0.5rem 0.7rem; border-radius: 0;
   border: 1px solid var(--rule); box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
-.popup-id { font-family: var(--mono); font-size: 0.85em; color: var(--muted); }
-.popup-name { font-weight: 600; margin: 0.1rem 0; }
-.popup-type { font-family: var(--mono); font-size: 0.78em; color: var(--muted); }
-.popup-link { display: inline-block; margin-top: 0.3rem; color: var(--accent); }
 #loading {
   position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
   z-index: 10; padding: 0.6rem 1rem; background: white;
   border: 1px solid var(--rule); font-family: var(--mono); font-size: 0.85rem;
 }
+@media (max-width: 700px) {
+  header { flex-wrap: wrap; gap: 0.5rem 1rem; }
+  #search { flex-basis: 100%; }
+  #detail {
+    position: absolute; inset: 0; flex-basis: auto;
+    border-left: none; z-index: 25;
+  }
+}
 </style>
 </head>
 <body>
 <header>
-  <h1>NaPTAN Viewer</h1>
+  <h1><a href="#">NaPTAN Viewer</a></h1>
   <div class="stats" id="stats">loading…</div>
   <div id="search">
     <input type="search" id="search-input" placeholder="Loading search…" autocomplete="off" disabled>
     <ul id="search-results" role="listbox" hidden></ul>
   </div>
 </header>
-<div id="map"></div>
+<div id="stage">
+  <div id="map"></div>
+  <aside id="detail" hidden></aside>
+</div>
 <div id="loading">loading stop data…</div>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>
 <script>
 async function fetchGzipJSON(url) {
   const res = await fetch(url);
@@ -112,9 +181,6 @@ function escapeHtml(s) {
   return (s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
-// Populated once names.json.gz finishes loading; map popups read from it lazily.
-let idToName = null;
-
 function classifyType(code) {
   if (!code) return 'other';
   const c = code[0];
@@ -124,6 +190,56 @@ function classifyType(code) {
   if (c === 'F') return 'ferry';                  // FER/FBT
   if (c === 'A' || c === 'G') return 'air';       // AIR/GAT
   return 'other';
+}
+
+const MODE_COLOR = {
+  bus: '#1a4d8f', rail: '#b03030', metro: '#7030a0',
+  ferry: '#2080a0', air: '#c06000', other: '#555',
+};
+
+function regionFromId(id) {
+  // IE prefixes are in 7xx and 8xx; everything else (0-6, 9) is GB.
+  return (id[0] === '7' || id[0] === '8') ? 'ie' : 'gb';
+}
+
+// ---- shared state, populated as data streams in ----
+let idToName = null;        // id -> name, for popups / nearby labels
+let searchEntries = null;   // [id, name, type, nameLower] for every record
+let pointFeatures = [];     // GeoJSON point features for every mapped stop
+let currentId = null;       // the stop the hash currently points at
+
+// ---- XML pretty-printer (from the old detail page) ----
+function prettyXml(xmlString) {
+  try {
+    const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) return xmlString;
+    return formatNode(doc.documentElement, 0);
+  } catch {
+    return xmlString;
+  }
+}
+function formatNode(node, depth) {
+  const indent = '  '.repeat(depth);
+  if (node.nodeType === Node.TEXT_NODE) {
+    const t = node.nodeValue.trim();
+    return t ? indent + escapeHtml(t) : '';
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const attrs = Array.from(node.attributes || [])
+    .map(a => ` ${a.name}="${escapeHtml(a.value)}"`).join('');
+  const children = Array.from(node.childNodes)
+    .map(c => formatNode(c, depth + 1))
+    .filter(Boolean);
+  if (!children.length) return `${indent}<${node.tagName}${attrs}/>`;
+  if (children.length === 1 && node.childNodes.length === 1
+      && node.firstChild.nodeType === Node.TEXT_NODE) {
+    return `${indent}<${node.tagName}${attrs}>${escapeHtml(node.firstChild.nodeValue.trim())}</${node.tagName}>`;
+  }
+  return [
+    `${indent}<${node.tagName}${attrs}>`,
+    ...children,
+    `${indent}</${node.tagName}>`,
+  ].join('\n');
 }
 
 const ATTRIBUTIONS = [
@@ -140,6 +256,8 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+
+let selMarker = null;       // marker on the currently-selected stop
 
 map.on('load', async () => {
   map.addSource('stops', {
@@ -212,20 +330,9 @@ map.on('load', async () => {
     map.easeTo({ center: feature.geometry.coordinates, zoom });
   });
 
-  // Stop click — popup with link
+  // Stop click — select it via the hash (opens the detail panel)
   map.on('click', 'stops', (e) => {
-    const f = e.features[0];
-    const { id, type } = f.properties;
-    const name = idToName?.get(id);
-    new maplibregl.Popup({ closeButton: false, offset: 8 })
-      .setLngLat(f.geometry.coordinates)
-      .setHTML(`
-        ${name ? `<div class="popup-name">${escapeHtml(name)}</div>` : ''}
-        <div class="popup-id">${escapeHtml(id)}</div>
-        <div class="popup-type">${escapeHtml(type)}</div>
-        <a class="popup-link" href="stop/?id=${encodeURIComponent(id)}">View details →</a>
-      `)
-      .addTo(map);
+    location.hash = encodeURIComponent(e.features[0].properties.id);
   });
   map.on('mouseenter', 'clusters', () => map.getCanvas().style.cursor = 'pointer');
   map.on('mouseleave', 'clusters', () => map.getCanvas().style.cursor = '');
@@ -254,6 +361,7 @@ map.on('load', async () => {
         properties: { id, type, mode: classifyType(type) },
       };
     }
+    pointFeatures = features;
     map.getSource('stops').setData({ type: 'FeatureCollection', features });
     document.getElementById('stats').innerHTML =
       `<b>${gb.length.toLocaleString()}</b> GB · <b>${ie.length.toLocaleString()}</b> IE`;
@@ -263,42 +371,172 @@ map.on('load', async () => {
     document.getElementById('stats').textContent = 'error';
     console.error(err);
   }
-});
-</script>
 
-<script>
-// In-browser substring search over names.json.gz — no pagefind / Rust / stubs.
+  // Now that the map is ready, honour any #atco_code in the URL and react to
+  // subsequent hash changes (search results, nearby links, map clicks).
+  window.addEventListener('hashchange', handleHash);
+  handleHash();
+});
+
+// ---- detail panel driven by location.hash ----
+const detailEl = document.getElementById('detail');
+
+function handleHash() {
+  const id = decodeURIComponent(location.hash.slice(1)).trim();
+  if (!id) { clearSelection(); return; }
+  currentId = id;
+  selectStop(id);
+}
+
+function clearSelection() {
+  currentId = null;
+  detailEl.hidden = true;
+  detailEl.innerHTML = '';
+  if (selMarker) { selMarker.remove(); selMarker = null; }
+  document.title = 'NaPTAN Viewer';
+}
+
+function flyAndMark(stop) {
+  if (stop.lat == null || stop.lon == null) return;
+  map.flyTo({ center: [stop.lon, stop.lat], zoom: Math.max(map.getZoom(), 16) });
+  if (!selMarker) selMarker = new maplibregl.Marker({ color: getComputedStyle(document.documentElement).getPropertyValue('--sel').trim() || '#b03030' });
+  selMarker.setLngLat([stop.lon, stop.lat]).addTo(map);
+}
+
+function formatDist(m) {
+  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
+}
+
+// Nearest mapped stops to the selected one, via a quick bounding-box prefilter.
+function nearbyStops(lat, lon, excludeId, n = 8) {
+  if (lat == null || lon == null || !pointFeatures.length) return [];
+  const cosLat = Math.cos(lat * Math.PI / 180) || 1;
+  let win = 0.012;  // ~1.3 km; widen if too few candidates turn up
+  let cands = [];
+  for (let pass = 0; pass < 4 && cands.length < n; pass++, win *= 3) {
+    cands = [];
+    const dLon = win / cosLat;
+    for (const f of pointFeatures) {
+      const [flon, flat] = f.geometry.coordinates;
+      if (Math.abs(flat - lat) > win || Math.abs(flon - lon) > dLon) continue;
+      if (f.properties.id === excludeId) continue;
+      const dx = (flon - lon) * cosLat * 111320;
+      const dy = (flat - lat) * 111320;
+      cands.push({ f, d: Math.hypot(dx, dy) });
+    }
+  }
+  cands.sort((a, b) => a.d - b.d);
+  return cands.slice(0, n);
+}
+
+function renderNearby(stop) {
+  const list = nearbyStops(stop.lat, stop.lon, stop.id);
+  if (!list.length) return '';
+  const rows = list.map(({ f, d }) => {
+    const id = f.properties.id;
+    const name = idToName?.get(id) || '';
+    const color = MODE_COLOR[f.properties.mode] || MODE_COLOR.other;
+    return `<li><a href="#${encodeURIComponent(id)}">
+      <span class="n-dot" style="background:${color}"></span>
+      <span class="n-name">${escapeHtml(name) || '<em>(unnamed)</em>'}</span>
+      <span class="n-dist">${formatDist(d)}</span>
+      <span class="n-id">${escapeHtml(id)}</span>
+    </a></li>`;
+  }).join('');
+  return `<div class="section-h">Nearby stops</div><ul class="nearby-list">${rows}</ul>`;
+}
+
+function detailError(msg) {
+  detailEl.innerHTML = `
+    <div class="d-top">
+      <h1 id="d-name">Stop</h1>
+      <button id="d-close" title="Close" aria-label="Close">×</button>
+    </div>
+    <div class="d-error">${msg}</div>`;
+  wireClose();
+}
+
+function wireClose() {
+  const btn = document.getElementById('d-close');
+  if (btn) btn.addEventListener('click', () => { location.hash = ''; });
+}
+
+async function selectStop(id) {
+  detailEl.hidden = false;
+  detailEl.innerHTML = `
+    <div class="d-top">
+      <h1 id="d-name">Loading…</h1>
+      <button id="d-close" title="Close" aria-label="Close">×</button>
+    </div>`;
+  wireClose();
+
+  const region = regionFromId(id);
+  const prefix = id.slice(0, 3);
+  let chunk;
+  try {
+    chunk = await fetchGzipJSON(`data/${region}/${prefix}.json.gz`);
+  } catch (err) {
+    if (currentId === id) detailError(`Failed to load ${region}/${prefix}: ${escapeHtml(err.message)}`);
+    return;
+  }
+  if (currentId !== id) return;  // user navigated away while we were fetching
+
+  const stop = chunk.find(r => r.id === id);
+  if (!stop) { detailError(`Stop <b>${escapeHtml(id)}</b> not found in ${region}/${prefix}.`); return; }
+
+  document.title = `${stop.name || stop.id} (${stop.id}) — NaPTAN Viewer`;
+
+  const hasLoc = stop.lat != null && stop.lon != null;
+  detailEl.innerHTML = `
+    <div class="d-top">
+      <h1 id="d-name">${escapeHtml(stop.name || stop.id)}</h1>
+      <button id="d-close" title="Close" aria-label="Close">×</button>
+    </div>
+    <div class="meta">
+      <span><b>${escapeHtml(stop.id)}</b></span>
+      <span class="badge">${escapeHtml(stop.type) || '—'}</span>
+      ${hasLoc ? `<span>${stop.lat.toFixed(6)}, ${stop.lon.toFixed(6)}</span>` : '<span>no location</span>'}
+      <span>${region.toUpperCase()}</span>
+    </div>
+    <div id="d-nearby">${hasLoc ? renderNearby(stop) : ''}</div>
+    <div class="section-h">NaPTAN XML</div>
+    <pre><code class="language-xml" id="d-xml"></code></pre>`;
+  wireClose();
+
+  const xmlEl = document.getElementById('d-xml');
+  xmlEl.textContent = prettyXml(stop.xml);
+  hljs.highlightElement(xmlEl);
+
+  flyAndMark(stop);
+}
+
+// ---- in-browser substring search over names.json.gz ----
 (async () => {
   const input = document.getElementById('search-input');
   const resultsEl = document.getElementById('search-results');
-
-  let entries = null;  // [id, name, type, nameLower] for every record
 
   try {
     const [gb, ie] = await Promise.all([
       fetchGzipJSON('data/gb/names.json.gz'),
       fetchGzipJSON('data/ie/names.json.gz'),
     ]);
-    entries = new Array(gb.length + ie.length);
+    searchEntries = new Array(gb.length + ie.length);
     idToName = new Map();
     let i = 0;
     for (const r of gb) {
-      entries[i++] = [r[0], r[1], r[2], (r[1] || '').toLowerCase()];
+      searchEntries[i++] = [r[0], r[1], r[2], (r[1] || '').toLowerCase()];
       idToName.set(r[0], r[1]);
     }
     for (const r of ie) {
-      entries[i++] = [r[0], r[1], r[2], (r[1] || '').toLowerCase()];
+      searchEntries[i++] = [r[0], r[1], r[2], (r[1] || '').toLowerCase()];
       idToName.set(r[0], r[1]);
     }
-    input.placeholder = `Search ${entries.length.toLocaleString()} stops…`;
+    input.placeholder = `Search ${searchEntries.length.toLocaleString()} stops…`;
     input.disabled = false;
   } catch (err) {
     input.placeholder = `search unavailable (${err.message})`;
     return;
   }
-
-  // StopArea ATCO codes have 'G' as the 4th character; everything else is a StopPoint.
-  const kindOf = id => id[3] === 'G' ? 'stoparea' : 'stop';
 
   function rank(q, nameLower, idLower) {
     if (nameLower === q) return 0;
@@ -313,7 +551,7 @@ map.on('load', async () => {
     const q = qRaw.trim().toLowerCase();
     if (q.length < 2) return [];
     const matches = [];
-    for (const e of entries) {
+    for (const e of searchEntries) {
       const r = rank(q, e[3], e[0].toLowerCase());
       if (r >= 0) matches.push({ id: e[0], name: e[1], type: e[2], rank: r });
       if (matches.length > 1000) break;
@@ -329,14 +567,11 @@ map.on('load', async () => {
       resultsEl.hidden = false;
       return;
     }
-    resultsEl.innerHTML = results.map(r => {
-      const href = `${kindOf(r.id)}/?id=${encodeURIComponent(r.id)}`;
-      return `<li role="option"><a href="${href}">
+    resultsEl.innerHTML = results.map(r => `<li role="option"><a href="#${encodeURIComponent(r.id)}">
         <span class="r-name">${escapeHtml(r.name) || '<em>(unnamed)</em>'}</span>
         <span class="r-type">${escapeHtml(r.type)}</span>
         <span class="r-id">${escapeHtml(r.id)}</span>
-      </a></li>`;
-    }).join('');
+      </a></li>`).join('');
     resultsEl.hidden = false;
   }
 
@@ -351,11 +586,15 @@ map.on('load', async () => {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#search')) resultsEl.hidden = true;
   });
+  // Hash navigation does the work; just collapse the dropdown after a pick.
+  resultsEl.addEventListener('click', (e) => {
+    if (e.target.closest('a')) resultsEl.hidden = true;
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { resultsEl.hidden = true; input.blur(); }
     if (e.key === 'Enter') {
       const first = resultsEl.querySelector('li a');
-      if (first) location.href = first.getAttribute('href');
+      if (first) { location.hash = first.getAttribute('href').slice(1); resultsEl.hidden = true; }
     }
   });
 })();
